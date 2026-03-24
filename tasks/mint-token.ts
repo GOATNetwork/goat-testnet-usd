@@ -141,23 +141,6 @@ async function sendMintTransaction(
   });
 }
 
-async function readRecipientBalance(
-  viem: Awaited<
-    ReturnType<HardhatRuntimeEnvironment["network"]["connect"]>
-  >["viem"],
-  tokenSpec: TokenSpec,
-  tokenAddress: `0x${string}`,
-  recipientAddress: `0x${string}`,
-) {
-  if (tokenSpec.contractName === "TestUSDC") {
-    const contract = await viem.getContractAt("TestUSDC", tokenAddress);
-    return contract.read.balanceOf([recipientAddress]);
-  }
-
-  const contract = await viem.getContractAt("TestUSDT", tokenAddress);
-  return contract.read.balanceOf([recipientAddress]);
-}
-
 function formatExplorerTransactionUrl(
   explorerUrl: string | undefined,
   txHash: `0x${string}`,
