@@ -25,12 +25,6 @@ Run the full test suite:
 npx hardhat test
 ```
 
-Run only one test layer if needed:
-
-```shell
-npx hardhat test
-```
-
 The Solidity tests cover metadata, owner minting, and access control. The `node:test` suite covers deployment, minting, `permit`, expired/invalid signatures, and the normal `approve` / `transferFrom` flow.
 
 ## Deploying With Ignition
