@@ -52,13 +52,15 @@ The deployment module returns both contract instances:
 Use the Hardhat task below to mint tokens from the owner account configured for the target network:
 
 ```shell
-npx hardhat --network testnet3 mint-token usdc <recipient-address> 1000
-npx hardhat --network testnet3 mint-token usdt <recipient-address> 500
+npx hardhat --network testnet3 mint-token tusdc <recipient-address> 1000
+npx hardhat --network testnet3 mint-token tusdt <recipient-address> 500
+npx hardhat --network testnet3 mint-token all <recipient-address> 1000
 ```
 
-- The first argument accepts `usdc` or `usdt`.
+- The first argument accepts `tusdc`, `tusdt`, or `all`.
 - The second argument is the recipient address.
 - The third argument is the human-readable token amount.
+- `all` will mint the same amount of both `tUSDT` and `tUSDC` to the recipient.
 - The task resolves the token contract address from `ignition/deployments/chain-<chainId>/deployed_addresses.json`.
 - `amount` is parsed with 18 decimals.
 - You must already have deployed `TestTokensModule` to the target network with Ignition.

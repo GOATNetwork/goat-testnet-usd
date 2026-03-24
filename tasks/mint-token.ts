@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { HardhatRuntimeEnvironment } from "hardhat/types/hre";
-import { formatUnits, getAddress, isAddress, parseUnits } from "viem";
+import type { Account } from "viem";
+import { getAddress, isAddress, parseUnits } from "viem";
 
 interface MintTokenTaskArguments {
   token: string;
@@ -10,33 +11,49 @@ interface MintTokenTaskArguments {
   amount: string;
 }
 
-type TokenName = "TestUSDC" | "TestUSDT";
 type DeploymentAddresses = Record<string, `0x${string}`>;
-const moduleIdByToken: Record<TokenName, string> = {
-  TestUSDC: "TestTokensModule#TestUSDC",
-  TestUSDT: "TestTokensModule#TestUSDT",
+const tokenSpecs = {
+  tusdt: {
+    selector: "tusdt",
+    symbol: "tUSDT",
+    contractName: "TestUSDT",
+    moduleId: "TestTokensModule#TestUSDT",
+  },
+  tusdc: {
+    selector: "tusdc",
+    symbol: "tUSDC",
+    contractName: "TestUSDC",
+    moduleId: "TestTokensModule#TestUSDC",
+  },
+} as const;
+
+type TokenSelector = keyof typeof tokenSpecs;
+type TokenSpec = (typeof tokenSpecs)[TokenSelector];
+const tokenAliases: Record<string, TokenSpec> = {
+  tusdt: tokenSpecs.tusdt,
+  usdt: tokenSpecs.tusdt,
+  testusdt: tokenSpecs.tusdt,
+  tusdc: tokenSpecs.tusdc,
+  usdc: tokenSpecs.tusdc,
+  testusdc: tokenSpecs.tusdc,
 };
 
-function resolveTokenName(value: string): TokenName {
+function resolveTokenSpecs(value: string): TokenSpec[] {
   const normalized = value.toLowerCase();
 
-  if (
-    normalized === "usdc" ||
-    normalized === "tusdc" ||
-    normalized === "testusdc"
-  ) {
-    return "TestUSDC";
+  if (normalized === "all") {
+    return [tokenSpecs.tusdt, tokenSpecs.tusdc];
   }
 
-  if (
-    normalized === "usdt" ||
-    normalized === "tusdt" ||
-    normalized === "testusdt"
-  ) {
-    return "TestUSDT";
+  const tokenSpec = tokenAliases[normalized];
+
+  if (tokenSpec === undefined) {
+    throw new Error(
+      `Unsupported token "${value}". Use tusdt, tusdc, usdt, usdc, testusdt, testusdc, or all.`,
+    );
   }
 
-  throw new Error(`Unsupported token "${value}". Use usdc or usdt.`);
+  return [tokenSpec];
 }
 
 function resolveExplorerUrl(
@@ -68,7 +85,7 @@ function resolveExplorerUrl(
 
 async function loadDeploymentAddress(
   chainId: number,
-  tokenName: TokenName,
+  tokenSpec: TokenSpec,
 ): Promise<`0x${string}`> {
   const deploymentFile = path.resolve(
     process.cwd(),
@@ -90,16 +107,81 @@ async function loadDeploymentAddress(
     );
   }
 
-  const moduleId = moduleIdByToken[tokenName];
-  const deployedAddress = addresses[moduleId];
+  const deployedAddress = addresses[tokenSpec.moduleId];
 
   if (deployedAddress === undefined) {
     throw new Error(
-      `Deployment record ${moduleId} not found in ${deploymentFile}. Re-run the TestTokens Ignition deployment for this network.`,
+      `Deployment record ${tokenSpec.moduleId} not found in ${deploymentFile}. Re-run the TestTokens Ignition deployment for this network.`,
     );
   }
 
   return getAddress(deployedAddress);
+}
+
+async function sendMintTransaction(
+  viem: Awaited<
+    ReturnType<HardhatRuntimeEnvironment["network"]["connect"]>
+  >["viem"],
+  tokenSpec: TokenSpec,
+  tokenAddress: `0x${string}`,
+  recipientAddress: `0x${string}`,
+  mintAmount: bigint,
+  account: Account,
+) {
+  if (tokenSpec.contractName === "TestUSDC") {
+    const contract = await viem.getContractAt("TestUSDC", tokenAddress);
+    return contract.write.mint([recipientAddress, mintAmount], {
+      account,
+    });
+  }
+
+  const contract = await viem.getContractAt("TestUSDT", tokenAddress);
+  return contract.write.mint([recipientAddress, mintAmount], {
+    account,
+  });
+}
+
+async function readRecipientBalance(
+  viem: Awaited<
+    ReturnType<HardhatRuntimeEnvironment["network"]["connect"]>
+  >["viem"],
+  tokenSpec: TokenSpec,
+  tokenAddress: `0x${string}`,
+  recipientAddress: `0x${string}`,
+) {
+  if (tokenSpec.contractName === "TestUSDC") {
+    const contract = await viem.getContractAt("TestUSDC", tokenAddress);
+    return contract.read.balanceOf([recipientAddress]);
+  }
+
+  const contract = await viem.getContractAt("TestUSDT", tokenAddress);
+  return contract.read.balanceOf([recipientAddress]);
+}
+
+function formatExplorerTransactionUrl(
+  explorerUrl: string | undefined,
+  txHash: `0x${string}`,
+): string | undefined {
+  if (explorerUrl === undefined) {
+    return undefined;
+  }
+
+  return `${explorerUrl.replace(/\/$/, "")}/tx/${txHash}`;
+}
+
+function printSection(
+  title: string,
+  rows: Array<[string, string | number | bigint | undefined]>,
+) {
+  console.log(`\n=== ${title} ===`);
+
+  for (const [label, value] of rows) {
+    if (value === undefined) {
+      continue;
+    }
+
+    console.log(`${label.padEnd(10)} ${value}`);
+  }
 }
 
 export default async function (
@@ -112,7 +194,7 @@ export default async function (
     throw new Error(`Invalid recipient address: ${recipient}`);
   }
 
-  const tokenName = resolveTokenName(token);
+  const selectedTokenSpecs = resolveTokenSpecs(token);
   const recipientAddress = getAddress(recipient);
   const mintAmount = parseUnits(amount, 18);
 
@@ -121,48 +203,36 @@ export default async function (
   const publicClient = await viem.getPublicClient();
   const [walletClient] = await viem.getWalletClients();
   const chainId = await publicClient.getChainId();
-  const tokenAddress = await loadDeploymentAddress(chainId, tokenName);
   const explorerUrl = resolveExplorerUrl(hre, connection.networkName, chainId);
 
-  console.log(
-    `Minting ${amount} ${token.toUpperCase()} to ${recipientAddress}`,
-  );
-  console.log(`Token contract: ${tokenAddress}`);
-  console.log(`Resolved from chain ID: ${chainId}`);
-  console.log(`Network: ${connection.networkName}`);
-  console.log(`Sender: ${walletClient.account.address}`);
+  printSection("Context", [
+    ["Network", connection.networkName],
+    ["Chain ID", chainId],
+    ["Recipient", recipientAddress],
+    ["Amount", amount],
+    ["Sender", walletClient.account.address],
+  ]);
 
-  const txHash =
-    tokenName === "TestUSDC"
-      ? await (
-          await viem.getContractAt("TestUSDC", tokenAddress)
-        ).write.mint([recipientAddress, mintAmount], {
-          account: walletClient.account,
-        })
-      : await (
-          await viem.getContractAt("TestUSDT", tokenAddress)
-        ).write.mint([recipientAddress, mintAmount], {
-          account: walletClient.account,
-        });
-
-  const receipt = await publicClient.waitForTransactionReceipt({
-    hash: txHash,
-  });
-  const balance =
-    tokenName === "TestUSDC"
-      ? await (
-          await viem.getContractAt("TestUSDC", tokenAddress)
-        ).read.balanceOf([recipientAddress])
-      : await (
-          await viem.getContractAt("TestUSDT", tokenAddress)
-        ).read.balanceOf([recipientAddress]);
-
-  console.log(`Transaction hash: ${txHash}`);
-  if (explorerUrl !== undefined) {
-    console.log(
-      `Transaction URL: ${explorerUrl.replace(/\/$/, "")}/tx/${txHash}`,
+  for (const tokenSpec of selectedTokenSpecs) {
+    const tokenAddress = await loadDeploymentAddress(chainId, tokenSpec);
+    const txHash = await sendMintTransaction(
+      viem,
+      tokenSpec,
+      tokenAddress,
+      recipientAddress,
+      mintAmount,
+      walletClient.account,
     );
+    const receipt = await publicClient.waitForTransactionReceipt({
+      hash: txHash,
+    });
+    const transactionUrl = formatExplorerTransactionUrl(explorerUrl, txHash);
+
+    printSection(tokenSpec.symbol, [
+      ["Contract", tokenAddress],
+      ["Tx Hash", txHash],
+      ["Explorer", transactionUrl],
+      ["Block", receipt.blockNumber],
+    ]);
   }
-  console.log(`Block number: ${receipt.blockNumber}`);
-  console.log(`Recipient balance: ${formatUnits(balance, 18)}`);
 }

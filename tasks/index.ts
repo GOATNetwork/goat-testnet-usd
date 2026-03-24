@@ -4,10 +4,10 @@ const printAccounts = task("accounts", "Print the accounts")
   .setAction(() => import("./accounts.js"))
   .build();
 
-const mintToken = task("mint-token", "Mint TestUSDC or TestUSDT to a recipient")
+const mintToken = task("mint-token", "Mint tUSDC, tUSDT, or both to a recipient")
   .addPositionalArgument({
     name: "token",
-    description: "Token selector: usdc or usdt",
+    description: "Token selector: tusdc, tusdt, usdc, usdt, testusdc, testusdt, or all",
   })
   .addPositionalArgument({
     name: "recipient",
